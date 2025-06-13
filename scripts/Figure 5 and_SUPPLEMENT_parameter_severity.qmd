@@ -1,0 +1,403 @@
+---
+title: "FIGURE_and_SUPPLEMENT_parameter_severity"
+format:
+  html:
+    df-print: kable
+    fig-width: 10
+    fig-height: 7
+    code-fold: true
+    code-summary: "Show the code"
+    toc: true
+    toc-location: left
+    toc-depth: 3
+    number-sections: false
+    standalone: true
+    embed-resources: true
+editor: source
+execute:
+  cache: false
+editor_options:
+  chunk_output_type: console
+---
+
+## INITITATE
+
+```{r message = FALSE, warning = FALSE, "hide"}
+rm(list  = ls())
+
+require(toolboxH)
+require(ggplot2)
+require(ggthemes)
+require(scales)
+require(lubridate)
+require(here)
+require(plotly)
+require(patchwork)
+require(paletteer) #https://pmassicotte.github.io/paletteer_gallery/#Diverging
+initializeSkript()
+
+source(here("scripts/functions_model_240112.R"))
+
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, results = "hide")
+
+col_vector =  c("#CB769E", "#DE639A", "#A85C85", "#0081AF", "#4F6D7A", "#7C6A0A", "#368F8B", "#246A73", "#5CC1BC", "#62C370", "#F7C548", "#F97E44", "#FB3640", "#B7245C", "#0D3B66", "#3E2F5B", "#B2675E", "#644536") # Nogpalette 
+```
+
+## LOAD Data
+```{r}
+parameter_explanation = read_excel2(here("data/FIGURE_and_SUPPLEMENT_parameter/parameter_explanation_240106.xlsx"))
+parameter_explanation
+
+
+federal_countryinfo = fread(here("data/FIGURE_and_SUPPLEMENT_general/federal_countries.csv"))
+
+
+fixed_general_parameter  = read_excel2(here("data/FIGURE_and_SUPPLEMENT_parameter/fixed_general_parameter.xlsx"))
+
+
+indiv_age_independentparams_pre  = read_excel2(here("data/FIGURE_and_SUPPLEMENT_parameter/indiv_age_independentparams.xlsx"))
+
+
+parameters_together_pre = load_obj(here("data/FIGURE_and_SUPPLEMENT_parameter/parameters_together.RData"))
+
+
+
+epidataBL = fread(here("data/FIGURE_and_SUPPLEMENT_general/s1030_2_datint_ecdc_DE_BL_2023-03-26_v5_agestrat.txt"), dec = ",")
+
+fn_positivdata = here("data/FIGURE_and_SUPPLEMENT_parameter/data_wochenbericht_2023-KW02.xlsx")# https://ars.rki.de/Content/COVID19/Reports.aspx
+testzahlenGER = read_excel2(fn_positivdata, "Abb.1 Gesamt", skip = 4) 
+testzahlenGER$Bundesland  = "Deutschland"
+
+testzahlenBL = read_excel2(fn_positivdata, "Abb. 3 Bundesland", skip = 4)
+
+maxdate = as_date("2022-09-30") # last date of data
+```
+
+## Motivation: heterogeneity between regions
+### Data wrangling testpositivity
+```{r}
+testzahlen = rbind(testzahlenGER, testzahlenBL)[Bundesland != "unbekannt"]
+
+datehelper = data.table(DatumDesMittwochs = as_date("2020-01-08") + (0:200)*7 )
+datehelper[, wochentag := weekdays(DatumDesMittwochs)]
+datehelper[, wochennum  := isoweek(DatumDesMittwochs)]
+datehelper[, jahr  := year(DatumDesMittwochs)]
+datehelper[,jahrwoche := paste(jahr, wochennum)]
+
+testzahlen[, jahrwoche := paste(`Jahr KW Entnahme`, `KW Entnahme`)] 
+testzahlen[, DatumDesMittwochs := datehelper[match_hk(testzahlen$jahrwoche, datehelper$jahrwoche), DatumDesMittwochs]]
+testzahlen[, region := federal_countryinfo[match_hk(testzahlen$Bundesland, federal_countryinfo$german), region]]
+testzahlen[,.N, .(Bundesland, region)] %>% data.frame()
+
+testzahlen[, is_Germany := grepl("Germany", region)]
+
+testzahlen = testzahlen[DatumDesMittwochs <= maxdate ]
+```
+#### plot testpositivity
+```{r}
+p3 = ( ggplot(testzahlen, aes(DatumDesMittwochs, `Anteil positiv`, col = region, linewidth = is_Germany)) +
+          geom_line(alpha = 0.6))  +  
+  
+  scale_y_continuous(labels = label_percent(accuracy = 1),
+                     limits= c(0,1)) +
+  ylab("Test positivity")+
+  # ggtitle("B)")+
+  xlab("") +
+  labs(color = "")+
+  theme_minimal(base_size = 14)+
+  theme(legend.position = "top", 
+        strip.text.y = element_text(angle = 0),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust=1)
+  ) +
+  scale_color_manual(values = col_vector)+
+  guides(linewidth = "none", alpha = "none") +
+   scale_x_date(breaks = date_breaks(width = "6 months"), labels = label_date(format = "%b-%y"))+
+  scale_linewidth_manual(values = c(0.5, 2)) 
+ 
+p3
+
+```
+```{r}
+
+epidataBL = epidataBL[DateRep <= maxdate]
+epidataBL[, .N, CountryExp]
+epidataBL[, region := federal_countryinfo[match_hk(epidataBL$CountryExp, federal_countryinfo$dataname), region]]
+
+
+epidataBL[, NewConfCases7_100k7 := 7*NewConfCases7/Ntotal*100000]
+epidataBL[, AllDeaths_100k := AllDeaths/Ntotal*100000]
+
+epidataBL[, is_Germany := grepl("Germany", region)]
+
+p1=ggplot(epidataBL[Altersgruppe =="all" ],aes(DateRep, ifelse(NewConfCases7_100k7<1, 1, NewConfCases7_100k7), color = region, lwd = is_Germany) ) + 
+  ylab("7-day Testpositives / 100 000")+
+       geom_line(alpha = 0.6)  + 
+  scale_y_log10(breaks = log_breaks(10),label= label_comma(accuracy = 1) ) + 
+  theme_minimal(base_size = 14) + 
+    xlab("") +
+  labs(color = "")+
+  theme_minimal(base_size = 14)+
+  theme(legend.position = "top", 
+        strip.text.y = element_text(angle = 0),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust=1)
+  ) +
+  scale_color_manual(values = col_vector)+
+  guides(linewidth = "none", alpha = "none") +
+  scale_linewidth_manual(values = c(0.5, 2)) +
+   scale_x_date(breaks = date_breaks(width = "6 months"), labels = label_date(format = "%b-%y")) 
+
+p1
+
+p2=ggplot(epidataBL[Altersgruppe =="all" & is.na(AllDeaths_100k)==F],aes(DateRep, AllDeaths_100k, color = region,lwd = is_Germany) ) +
+       geom_line(alpha = 0.6)  + 
+  theme_minimal(base_size = 14) + 
+  scale_linewidth_manual(values = c(0.5,2))+
+    xlab("") +
+  labs(color = "")+
+  ylab("Cumulative deaths / 100 000")+
+  theme_minimal(base_size = 14)+
+  theme(legend.position = "top", 
+        strip.text.y = element_text(angle = 0),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust=1)
+  ) +
+  scale_color_manual(values = col_vector)+
+  guides(linewidth = "none", alpha = "none") +
+   scale_x_date(breaks = date_breaks(width = "6 months"), labels = label_date(format = "%b-%y"))
+ 
+p2  
+
+  p1+p2+p3 + plot_layout(guides =  "collect") & theme(legend.position = "top")
+
+```
+## Extract paramters
+```{r}
+
+
+timeinvariant_parameter = extract_timeinvariant_parameter(parameters_together_pre, indiv_age_independentparams_pre, fixed_general_parameter,federal_countryinfo,parameter_explanation)
+
+timeinvariant_parameter[, is_Germany := grepl("Germany", region)]
+timeinvariant_parameter[, parameter3 := paste0(parameter, ": ", parameter2)]
+
+```
+
+
+## Age specific - Death
+### data wrangling
+
+```{r}
+
+plotdat_death = timeinvariant_parameter[grepl("death", parameter2)]
+helper = dcast.data.table(plotdat_death[parameter %in% c("r8"), .(region, parameter, value)] %>% unique, region  ~ parameter ,  value.var = "value")
+plotdat_death[, general_rate := helper[match_hk(plotdat_death$region, helper$region), r8]]
+helper2 = plotdat_death[parameter =="pdeath_alpha"] %>% unique()# wildtype rate, used as factor for mutations
+helper2[, id:= paste(region, agegroup)]
+
+plotdat_death[, wildtype_rate := helper2[match_hk(paste(plotdat_death$region, plotdat_death$agegroup), helper2$id), value]]
+
+plotdat_death2 = plotdat_death[parameter != "r8"]
+plotdat_death2[, value2 := value * general_rate*wildtype_rate]
+
+plotdat_death2[, variant:= str_split(parameter2, " ") %>% sapply(., last)]
+plotdat_death2[, variant:=factor(variant, levels = unique(variant))]
+plotdat_death2[,.N, variant]
+
+
+```
+### plot
+```{r fig.width=28, fig.height=12}
+p_death = ggplot(plotdat_death2, aes(agegroup, value2, ymin = value2, ymax = value2, col = region, fill = region, linewidth = is_Germany, alpha = is_Germany)) + 
+  geom_crossbar()  + 
+  labs(col = "", fill = "")+
+  facet_grid(variant~.)+
+  coord_flip() +
+  theme_minimal(base_size = 12)+
+  theme(legend.position = "top", 
+        strip.text.y = element_text(angle = 0)
+  ) + 
+  # scale_colour_manual(values = c(alpha(colour = "darkred", 0.5), alpha(colour = "steelblue4", 0.5)))+
+  # scale_fill_manual(values = c(alpha(colour = "darkred", 0.5), alpha(colour = "steelblue4", 0.5)))+
+  xlab("") +
+  scale_fill_manual(values = col_vector)+
+  scale_color_manual(values = col_vector)+
+  scale_y_log10(breaks = log_breaks(8))+
+  
+  ylab("Combined rates compartment I2 (infected) -> D (dead) for immunologically naive patients") + 
+  scale_linewidth_manual(values = c(0.5, 2)) +
+  scale_alpha_manual(values = c(0.2, 1)) +
+  guides(linewidth = "none", alpha = "none")
+```
+
+
+```{r fig.width=28, fig.height=12, results='markup'}
+ggplotly(p_death)
+
+
+```
+
+```{r}
+
+p_combideath=  (p1+guides(col="none")+
+     p2+guides(col="none")+
+     p3 +guides(col="none")) /p_death+ plot_layout(guides =  "collect", heights = c(1, 1.5)) + plot_annotation(tag_levels = "A")& theme(legend.position = "top") &   theme(plot.tag = element_text(face = 'bold', size = 19)) & guides( fill =guide_legend(ncol=6))
+p_combideath
+```
+
+
+### save plot
+```{r}
+
+pdf(here("results/FIGURE 5 observed_heterogeneity_vs_parameter_death_rates.pdf"), 11,11)
+p_combideath
+dev.off()
+
+```
+
+
+## Age specific - ICU
+### data wrangling
+
+```{r}
+
+plotdat_icu = timeinvariant_parameter[grepl("ICU", parameter2) & (grepl("transit time", parameter2)==F)]
+unique(plotdat_icu$parameter3)
+helper = dcast.data.table(plotdat_icu[parameter %in% c("r6"), .(region, parameter, value)] %>% unique, region  ~ parameter ,  value.var = "value")
+plotdat_icu[, general_rate := helper[match_hk(plotdat_icu$region, helper$region), r6]]
+helper2 = plotdat_icu[parameter =="pcrit_alpha"] %>% unique()# wildtype rate, used as factor for mutations
+helper2[, id:= paste(region, agegroup)]
+
+plotdat_icu[, wildtype_rate := helper2[match_hk(paste(plotdat_icu$region, plotdat_icu$agegroup), helper2$id), value]]
+
+plotdat_icu2 = plotdat_icu[parameter != "r6"]
+plotdat_icu2[, value2 := value * general_rate*wildtype_rate]
+
+plotdat_icu2[, variant:= str_split(parameter2, " ") %>% sapply(., last)]
+plotdat_icu2[, variant:=factor(variant, levels = unique(variant))]
+plotdat_icu2[,.N, variant]
+
+
+```
+### plot
+```{r fig.width=28, fig.height=12}
+p_icu = ggplot(plotdat_icu2, aes(agegroup, value2, ymin = value2, ymax = value2, col = region, fill = region, linewidth = is_Germany, alpha = is_Germany)) + 
+  geom_crossbar()  + 
+  labs(col = "", fill = "")+
+  facet_grid(variant~.)+
+  coord_flip() +
+  theme_minimal(base_size = 12)+
+  theme(legend.position = "top", 
+        strip.text.y = element_text(angle = 0)
+  ) + 
+  # scale_colour_manual(values = c(alpha(colour = "darkred", 0.5), alpha(colour = "steelblue4", 0.5)))+
+  # scale_fill_manual(values = c(alpha(colour = "darkred", 0.5), alpha(colour = "steelblue4", 0.5)))+
+  xlab("") +
+  scale_fill_manual(values = col_vector)+
+  scale_color_manual(values = col_vector)+
+
+  ylab("Combined rates compartment I2 (infected) -> C (ICU) for immunologically naive patients") +
+  scale_y_log10(breaks = log_breaks(8))+
+ scale_linewidth_manual(values = c(0.5, 2)) +
+  scale_alpha_manual(values = c(0.2, 1)) +
+  guides(linewidth = "none", alpha = "none")
+```
+
+
+```{r fig.width=28, fig.height=12, results='markup'}
+ggplotly(p_icu)
+
+
+```
+
+### save plot
+```{r}
+
+jpeg2(here("results/SUPPLEMENT_parameter_icu_rates.jpeg"), 11,7)
+p_icu
+dev.off()
+
+```
+
+
+
+
+
+
+
+
+## Age specific - Hospital
+### data wrangling
+
+```{r}
+
+plotdat_hospital = timeinvariant_parameter[grepl("hospital", parameter2) & (grepl("transit time", parameter2)==F)]
+unique(plotdat_hospital$parameter3)
+helper = dcast.data.table(plotdat_hospital[parameter %in% c("r9"), .(region, parameter, value)] %>% unique, region  ~ parameter ,  value.var = "value")
+plotdat_hospital[, general_rate := helper[match_hk(plotdat_hospital$region, helper$region), r9]]
+helper2 = plotdat_hospital[parameter =="pnorm_alpha"] %>% unique()# wildtype rate, used as factor for mutations
+helper2[, id:= paste(region, agegroup)]
+
+plotdat_hospital[, wildtype_rate := helper2[match_hk(paste(plotdat_hospital$region, plotdat_hospital$agegroup), helper2$id), value]]
+
+plotdat_hospital2 = plotdat_hospital[parameter != "r9"]
+plotdat_hospital2[, value2 := value * general_rate*wildtype_rate]
+
+plotdat_hospital2[, variant:= str_split(parameter2, " ") %>% sapply(., last)]
+plotdat_hospital2[, variant:=factor(variant, levels = unique(variant))]
+plotdat_hospital2[,.N, variant]
+
+
+```
+### plot
+```{r fig.width=28, fig.height=12}
+p_hospital = ggplot(plotdat_hospital2, aes(agegroup, value2, ymin = value2, ymax = value2, col = region, fill = region, linewidth = is_Germany, alpha = is_Germany)) + 
+  geom_crossbar()  + 
+  labs(col = "", fill = "")+
+  facet_grid(variant~.)+
+  coord_flip() +
+  theme_minimal(base_size = 12)+
+  theme(legend.position = "top", 
+        strip.text.y = element_text(angle = 0)
+  ) + 
+  # scale_colour_manual(values = c(alpha(colour = "darkred", 0.5), alpha(colour = "steelblue4", 0.5)))+
+  # scale_fill_manual(values = c(alpha(colour = "darkred", 0.5), alpha(colour = "steelblue4", 0.5)))+
+  xlab("") +
+  scale_fill_manual(values = col_vector)+
+  scale_color_manual(values = col_vector)+
+   
+  ylab("Combined rates compartment I2 (infected) -> N (Hospital) for immunologically naive patients") +
+  scale_y_log10(breaks = log_breaks(8))+
+  
+   scale_linewidth_manual(values = c(0.5, 2)) +
+  scale_alpha_manual(values = c(0.2, 1)) +
+  guides(linewidth = "none", alpha = "none")
+```
+
+
+```{r fig.width=28, fig.height=12, results='markup'}
+ggplotly(p_hospital)
+
+
+```
+
+### save plot
+```{r}
+
+jpeg2(here("results/SUPPLEMENT_parameter_hospitalisation_rates.jpeg"), 11,7)
+p_hospital
+dev.off()
+
+```
+## variance in r1 and r9
+```{r}
+r1_r9 = timeinvariant_parameter[parameter %in% c("r1", "r9")]
+r1_r9_sdmean = r1_r9[region != "Germany", .(sd = sd(value), mean = mean(value)), by = parameter]
+r1_r9_sdmean[, sd_proz_mean := 100*sd/mean]
+r1_r9_sdmean
+```
+
+
+## Finalise
+```{r}
+
+finalizeSkript()
+```
+
