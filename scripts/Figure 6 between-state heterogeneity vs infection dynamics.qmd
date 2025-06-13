@@ -1,0 +1,167 @@
+---
+title: "FIGURE_parameter_infectivity_regional_heterogeneity"
+format:
+  html:
+    df-print: kable
+    fig-width: 10
+    fig-height: 7
+    code-fold: true
+    code-summary: "Show the code"
+    toc: true
+    toc-location: left
+    toc-depth: 3
+    number-sections: false
+    standalone: true
+    embed-resources: true
+editor: source
+execute:
+  cache: false
+editor_options:
+  chunk_output_type: console
+---
+
+# INITITATE
+
+```{r message = FALSE, warning = FALSE, "hide"}
+rm(list  = ls())
+
+require(toolboxH)
+require(ggplot2)
+require(ggthemes)
+require(scales)
+require(lubridate)
+require(here)
+require(plotly)
+require(patchwork)
+require(paletteer) #https://pmassicotte.github.io/paletteer_gallery/#Diverging
+initializeSkript()
+
+source(here("scripts/functions_model_240112.R"))
+
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, results = "hide")
+
+col_vector =  c("#CB769E", "#DE639A", "#A85C85", "#0081AF", "#4F6D7A", "#7C6A0A", "#368F8B", "#246A73", "#5CC1BC", "#62C370", "#F7C548", "#F97E44", "#FB3640", "#B7245C", "#0D3B66", "#3E2F5B", "#B2675E", "#644536") # Nogpalette 
+ 
+
+maxdate = as_date("2022-09-30") # last date of data
+```
+
+# Model time dependent parameter r1
+
+## LOAD Data
+```{r}
+
+
+federal_countryinfo = fread(here("data/FIGURE_and_SUPPLEMENT_general/federal_countries.csv"))
+
+```
+
+
+```{r}
+todo = data.table(tensor_fn = dir(here("data/FIGURE_and_SUPPLEMENT_general/"), pattern = "Simulations"))
+
+todo[, id := tensor_fn %>% str_replace("SimulationsLand_", "") %>% str_split( "_|[A-Z]") %>% sapply("[", 1)]
+
+todo[, region := federal_countryinfo[match_hk(id, federal_countryinfo$ID), region]]
+
+
+b1_verlauf = lapply(todo$region, function(myregion){
+  # myregion = todo$region[1]
+  mytensor  = load_obj(paste0(here("data/FIGURE_and_SUPPLEMENT_general/",todo[region == myregion,tensor_fn])))
+  mydata = extractTensordata(tensor = mytensor, firstdate = as_date("2020-03-04"), scenarioname = myregion)
+ mydata$infectivitydata[, .(region = myregion, datum, agegroup = agegroup2, value)]
+ }) %>% rbindlist()
+```
+
+## DATA Wrangling
+```{r}
+b1_verlauf$agegroup %>% unique()
+b1_verlauf$region %>% unique()
+b1_verlauf[, is_Germany := grepl("Germany", region)]
+
+```
+
+## plot
+
+```{r}
+
+p_timedep = ggplot(b1_verlauf[datum<=maxdate] , aes(datum, value, col = region, fill = region)) + geom_line()  + 
+  labs(col = "", fill = "")+
+  facet_grid(agegroup~.)+ #, space = "free", scales = "free")+
+  theme_minimal(base_size = 14)+
+
+    scale_x_date(labels =  date_format("%b-%y"))+
+  xlab("") +
+  theme(legend.position = "top", 
+        strip.text.y = element_text(angle = 0),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust=1)
+  ) +
+
+  
+  ylab("dynamical infecting rate b1") +
+  
+  
+  ggtitle("B)")+
+  scale_color_manual(values = col_vector)+
+  guides(linewidth = "none", alpha = "none",color = "none") +
+  coord_cartesian(ylim = c(0, 1.7))
+ggplotly(p_timedep)
+```
+
+
+```{r fig.width=14, fig.height=14,results ='markup'}
+p_timedep %>% ggplotly()
+```
+
+# COMPARE with heterogeneity
+
+## LOAD
+```{r}
+epidataBL = fread(here("data/FIGURE_and_SUPPLEMENT_general/s1030_2_datint_ecdc_DE_BL_2023-03-26_v5_agestrat.txt"), dec = ",")#[CountryExp=="Deutschland"]
+```
+
+## DATA Wrangling
+```{r}
+epidataBL[, region := federal_countryinfo[match_hk(epidataBL$CountryExp, federal_countryinfo$dataname), region]]
+
+epidataBL[, NewConfCases7_100k7 := 7*NewConfCases7/Ntotal*100000]
+epidataBL[, AllDeaths_100k := AllDeaths/Ntotal*100000]
+
+epidataBL[, is_Germany := grepl("Germany", region)]
+epidataBL[, Altersgruppe2 := ifelse(Altersgruppe=="all", "all age groups", Altersgruppe)]
+p_epi = ggplot(epidataBL[Altersgruppe =="all" & DateRep<= maxdate],aes(DateRep, ifelse(NewConfCases7_100k7<1, 1, NewConfCases7_100k7), color = region) ) + 
+  ylab("7-day-testpositives\nper 100 000")+
+  geom_line() +
+  xlab("")+
+  labs(color = "")+
+  # facet_wrap(~Altersgruppe2  ,scales = "free") +  
+  scale_y_log10(breaks = log_breaks(10),label= label_comma(accuracy = 1) ) + 
+  theme_minimal(base_size = 14) +
+  ggtitle("A)")+
+  # scale_linewidth_manual(values = c(0.7,2))+
+  
+  scale_color_manual(values = col_vector)+
+  scale_x_date(labels =  date_format("%b-%y"))+
+  xlab("") +
+  theme(legend.position = "top", 
+        strip.text.y = element_text(angle = 0),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust=1)
+  )
+
+p_epi
+```
+
+## Save plot
+```{r}
+p_fin = (p_epi + coord_cartesian(xlim = c(min(b1_verlauf$datum), maxdate)) 
+  
+) / p_timedep  + plot_layout(guides = "collect", heights = c(1,2)) & theme(legend.position = "top", legend.text = element_text(size = 10)) &guides( color =guide_legend(ncol=6,override.aes = list(linewidth = 3)))
+
+p_fin
+jpeg2(here("results/Figure6_between-state heterogeneity of infection dynamics.jpeg"), 10,8)
+p_fin
+dev.off()
+
+
+```
+
