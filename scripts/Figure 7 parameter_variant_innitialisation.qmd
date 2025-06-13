@@ -1,0 +1,176 @@
+---
+title: "SUPPLEMENTARY_FIGURE_parameter_variant_innitialisation"
+format:
+  html:
+    df-print: kable
+    fig-width: 10
+    fig-height: 7
+    code-fold: true
+    code-summary: "Show the code"
+    toc: true
+    toc-location: left
+    toc-depth: 3
+    number-sections: false
+    standalone: true
+    embed-resources: true
+editor: source
+execute:
+  cache: false
+editor_options:
+  chunk_output_type: console
+---
+
+## INITITATE
+
+```{r message = FALSE, warning = FALSE, "hide"}
+rm(list  = ls())
+
+require(toolboxH)
+require(ggplot2)
+require(ggthemes)
+require(scales)
+require(lubridate)
+require(here)
+require(plotly)
+require(patchwork)
+require(paletteer) #https://pmassicotte.github.io/paletteer_gallery/#Diverging
+library(RColorBrewer)
+initializeSkript()
+
+source(here("scripts/functions_model_240112.R"))
+
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, results = "hide")
+
+col_vector =  c("#CB769E", "#DE639A", "#A85C85", "#0081AF", "#4F6D7A", "#7C6A0A", "#368F8B", "#246A73", "#5CC1BC", "#62C370", "#F7C548", "#F97E44", "#FB3640", "#B7245C", "#0D3B66", "#3E2F5B", "#B2675E", "#644536") # Nogpalette 
+
+firstdate = as_date("2020-03-04")
+```
+
+## LOAD Data
+```{r}
+parameter_explanation = read_excel2(here("data/FIGURE_and_SUPPLEMENT_parameter/parameter_explanation_240106.xlsx"))
+parameter_explanation
+
+
+federal_countryinfo = fread(here("data/FIGURE_and_SUPPLEMENT_general/federal_countries.csv"))
+
+
+fixed_general_parameter  = read_excel2(here("data/FIGURE_and_SUPPLEMENT_parameter/fixed_general_parameter.xlsx"))
+
+
+indiv_age_independentparams_pre  = read_excel2(here("data/FIGURE_and_SUPPLEMENT_parameter/indiv_age_independentparams.xlsx"))
+
+
+parameters_together_pre = load_obj(here("data/FIGURE_and_SUPPLEMENT_parameter/parameters_together.RData"))
+```
+
+## Extract paramters
+```{r}
+
+
+timeinvariant_parameter = extract_timeinvariant_parameter(parameters_together_pre, indiv_age_independentparams_pre, fixed_general_parameter,federal_countryinfo,parameter_explanation)
+
+timeinvariant_parameter[, is_Germany := grepl("Germany", region)]
+timeinvariant_parameter[, parameter3 := paste0(parameter, ": ", parameter2)]
+
+```
+
+
+
+
+
+
+## Data wrangling
+```{r}
+timeinvariant_parameter[,.N, specificity]
+plotdat_init_mutants = timeinvariant_parameter[parameter == "dateallele_Wildtype" | (specificity == "region" & grepl("initial", ignore.case = T, parameter2))]
+unique(plotdat_init_mutants$parameter3)
+
+
+plotdat_init_mutants[, vartype := str_split(parameter2, " ") %>% sapply(., "[", 2)] 
+plotdat_init_mutants[, .N, vartype]
+plotdat_init_mutants[, variant:= str_split(parameter2, " ") %>% sapply(., last)]
+plotdat_init_mutants[,.N, variant]
+
+plotdat_init_mutants2 = plotdat_init_mutants[variant %in% c( "Wildtype", "Alpha", "Delta", "BA1", "BA2", "BA5"), -"agegroup"] %>% unique()
+plotdat_init_mutants2[,.N, variant]
+plotdat_init_mutants2[, variant:=factor(variant, levels = unique(variant))]
+
+
+plotdat_init_mutants3 = dcast.data.table(plotdat_init_mutants2, region +ew2021+ variant ~ vartype, value.var = c('value'))
+
+## actually, influx WT is number evenly ditributed accross 3 weeks
+plotdat_init_mutants3a = plotdat_init_mutants3[variant =="Wildtype"]
+plotdat_init_mutants3b = plotdat_init_mutants3[variant !="Wildtype"]
+
+plotdat_init_mutants3a2 = plotdat_init_mutants3a[, .(date = 1:21, number = number/21), .(ew2021, region, variant)]
+
+# plotdat_init_mutants3c = copy(plotdat_init_mutants3b)
+# plotdat_init_mutants3c[, number := 0]
+# 
+# plotdat_init_mutants4 = rbind(plotdat_init_mutants3a2, plotdat_init_mutants3b, plotdat_init_mutants3c)
+plotdat_init_mutants4 = rbind(plotdat_init_mutants3a2, plotdat_init_mutants3b)
+
+plotdat_init_mutants4[, datum := firstdate-1 + date]
+plotdat_init_mutants4[, value_per100k := 100000*number/ew2021]
+```
+
+## Plot    
+```{r}
+n <- uniqueN(plotdat_init_mutants4$region)
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+
+p_timeindep3 = ggplot(plotdat_init_mutants4, aes(datum, value_per100k,col = region, fill = region)) + 
+  # geom_col( position = position_dodge2(width = 0.9, preserve = "single"))  + 
+  # geom_line(lwd = 1)  +
+  geom_point(size = 4, alpha  = 0.5)+
+  facet_wrap(~variant, scales = "free", ncol = 3) +
+  labs(col = "", fill = "")+
+  theme_minimal(base_size = 16)+
+  theme(legend.position = "right", 
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) + 
+  scale_x_date(breaks = date_breaks(width = "1 week"), labels = label_date(format = "%d-%b-%y"))+
+  # scale_y_log10(breaks = log_breaks(8)) +
+  scale_y_continuous(breaks = pretty_breaks(8)) +
+  xlab("") +
+  ylab("initial influx per 100 000 inhabitants") +
+  # coord_flip()+
+  scale_fill_manual(values = col_vector)+
+  scale_color_manual(values = col_vector)+
+  guides(fill=guide_legend(ncol=1),
+         color=guide_legend(ncol=1))
+  # scale_color_manual(values = rep(alpha("black", 0.3), n))+
+  # ggtitle("B) Date dependent Influx of variants") 
+# scale_y_log10(breaks = log_breaks(8))
+# scale_linewidth_manual(values = c(0.5, 2)) +
+# scale_alpha_manual(values = c(0.2, 1)) +
+# guides(linewidth = "none", alpha = "none")
+
+p_timeindep3
+fig_hetero = p_timeindep3 %+% filter(plotdat_init_mutants4, variant != "Wildtype") + 
+  geom_point(
+    data = filter(plotdat_init_mutants4, region == "Germany" & variant != "Wildtype"),
+    size = 2, alpha  = 0.75, pch = 1, color = "black")+ 
+  geom_point(
+    data = filter(plotdat_init_mutants4, region == "Germany" & variant != "Wildtype"),
+    size = 4, alpha  = 0.75, pch = 1, color = "black")
+fig_hetero
+```
+<!-- save pig -->
+```{r}
+
+
+pdf(here("results/FIGURE 7 influx_variants2.pdf"), 13,8)
+fig_hetero
+dev.off()
+
+```
+
+
+
+## Finalise
+```{r}
+
+finalizeSkript()
+```
+
