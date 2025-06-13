@@ -2,7 +2,7 @@
 
 Scripts and data accompanying Publication Kheifetz et al. "Modelling complete dynamics of SARS-CoV-2 pandemics of Germany and its federal states using multiple levels of data"
 
-This repository contains the scripts and data necessary to reproduce results presented in the manuscript titled "Modelling complete dynamics of SARS-CoV-2 pandemics of Germany and its federal states using multiple levels of data" (Kheifetz et al., 2021). The repository is organized into three main folders: data, scripts, and results.
+This repository contains the scripts and data necessary to reproduce results presented in the manuscript titled "Modelling complete dynamics of SARS-CoV-2 pandemics of Germany and its federal states using multiple levels of data" (Kheifetz et al., 2025, in revision). The repository is organized into three main folders: data, scripts, and results.
 
 #### Data
 
